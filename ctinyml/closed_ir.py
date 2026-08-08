@@ -25,6 +25,10 @@ class Tensor:
     # Quantization metadata (Phase 3 onward); unset until quantize.py runs.
     scale: float | None = None
     zero_point: int | None = None
+    # Ping-pong SRAM buffer index (0 or 1); unset until buffer_planner.py
+    # runs, and stays None for graph inputs/outputs and initializers,
+    # which are caller-supplied/PROGMEM rather than planner-owned.
+    buffer: int | None = None
 
 
 @dataclass

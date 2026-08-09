@@ -1,6 +1,6 @@
-# Known Issues — Phases 0–5
+# Known Issues — Phases 0–6
 
-A retrospective log of bugs and gotchas actually hit while *implementing* Phases 0–5, as opposed to `context/phase_*.md`, which are archived copies of the plan documents (intent, written before implementation). Kept separate and up to date so the same mistakes aren't rediscovered in Phase 6+.
+A retrospective log of bugs and gotchas actually hit while *implementing* Phases 0–6, as opposed to `context/phase_*.md`, which are archived copies of the plan documents (intent, written before implementation). Kept separate and up to date so the same mistakes aren't rediscovered in Phase 7+.
 
 ---
 
@@ -87,6 +87,12 @@ One design decision made here *looked* safe at the time but turned out to be the
 ## Phase 5, architecture change touching already-shipped Phase 3 code — kernel/emitter registries
 
 Not a bug, but worth recording since it retroactively modified `interpreter.py`: the first draft of `emit_layout.py` had an `if op.op_type == "Conv": ... elif == "Gemm": ...` block, the same shape of dispatch already present in `interpreter.py`'s `match op.op_type` from Phase 3. Rather than let that pattern re-multiply across every codegen module, introduced per-op-type registries mirroring onnxruntime's kernel-registry pattern: `ctinyml/ops.py`'s target-agnostic `KERNELS` registry (owns shape derivation + float forward eval; `interpreter.py`'s numeric bodies moved here so `ops.py` has no dependency on `interpreter.py`, avoiding a circular import) and `targets/avr/codegen/registry.py`'s AVR-specific `EMITTERS` registry (owns `#define` macros + C call-sites, colocated per op type). `closed_ir.Op`/`Tensor` themselves stay flat dataclasses, not subclassed — the registries live beside the IR, keyed by its plain `op_type` string, not inside it. Full regression run confirmed zero behavior change from the `interpreter.py` refactor.
+
+---
+
+## Phase 6 — no implementation bugs
+
+Every hand-computed kernel test (`conv2d_int8` boundary/rounding/zero-point cases, `dense_int8` both output paths, `argmax_i32`, `requantize` rounding/saturation, `pgm_read_*` round-trips), the byte-for-byte regression test against a verbatim copy of the reference file's kernels (both `CONV1`'s and `CONV2`'s actual shapes, plus `dense_int8`), and the bonus end-to-end DLL check (real Phase 5 codegen output linked against the real Phase 6 kernels) all passed on the first run. The three anticipated risks from this phase's own plan — signature drift against Phase 5's pinned stub contract, the `avr-gcc` toolchain gap, and MinGW not auto-exporting DLL symbols for `static` kernel functions — were all real and all handled as planned (full Phase 0–5 re-run confirmed no drift; host-gcc substitution plus an explicit "untested here" flag on the `#ifdef __AVR__` path; test-only non-static shim wrappers compiled with `-Wl,--export-all-symbols`). Planning for known failure modes ahead of time, informed by the Phase 0–5 retrospective, is presumably why none of them actually caused a mid-implementation surprise this time.
 
 ---
 

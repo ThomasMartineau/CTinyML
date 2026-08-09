@@ -1,8 +1,11 @@
 #pragma once
-/* Phase 5 stub: prototype only. Phase 6 replaces this with the real,
- * tested implementation ported from context/mnist_conv_dense_int8_avr.c
- * (round via +-0.5f, saturate to [-128,127]). */
+/* Ported verbatim from context/mnist_conv_dense_int8_avr.c. */
 
 #include <stdint.h>
 
-int8_t requantize(float acc_scaled, int8_t zero_point);
+static inline int8_t requantize(float acc_scaled, int8_t zero_point) {
+    int32_t q = (int32_t)(acc_scaled + (acc_scaled >= 0.0f ? 0.5f : -0.5f)) + zero_point;
+    if (q > 127) q = 127;
+    if (q < -128) q = -128;
+    return (int8_t)q;
+}

@@ -199,3 +199,20 @@ def test_quantize_end_to_end_mnist():
     assert input_tensor.scale is not None
     assert input_tensor.zero_point is not None
     assert input_tensor.dtype == "INT8"
+
+
+def test_quantize_excludes_argmax_output():
+    # Regression test: ArgMax's output is a discrete class index (int64),
+    # never meant to be calibrated/quantized -- see NON_CALIBRATED_OPS.
+    graph = _mnist_closed_ir()
+    drop_final_requant(graph)
+    rng = np.random.default_rng(0)
+    calibration_data = [
+        rng.uniform(0, 255, size=(1, 1, 28, 28)).astype(np.float32) for _ in range(8)
+    ]
+    quantize(graph, calibration_data)
+
+    (output_tensor,) = graph.outputs
+    assert output_tensor.dtype == "INT64"
+    assert output_tensor.scale is None
+    assert output_tensor.zero_point is None

@@ -8,7 +8,7 @@ from ctinyml import interpreter
 from ctinyml.frontend.load import load_model
 from ctinyml.passes import run_structural_passes
 from ctinyml.passes.convert_to_closed_ir import convert
-from ctinyml.interpreter import _argmax, _conv2d, _gemm
+from ctinyml.ops import _argmax, _conv2d, _gemm
 
 MNIST_FIXTURE = Path(__file__).parent / "fixtures" / "mnist" / "mnist_classifier.onnx"
 

@@ -28,6 +28,14 @@ from ctinyml import closed_ir, interpreter
 QMIN, QMAX = -128, 127
 QRANGE = QMAX - QMIN  # 255
 
+# Op types whose *output* is never a ranged float activation, so it must
+# never be calibrated / assigned a scale+zero_point: ArgMax's output is a
+# discrete class index (int64), not a quantity with a meaningful min/max
+# range to fit an affine int8 mapping to. Named and centralized here
+# (rather than an inline op_type check) so a future op type that also
+# shouldn't be calibrated is a one-line addition, not a re-derivation.
+NON_CALIBRATED_OPS = {"ArgMax"}
+
 
 def quantize(graph: closed_ir.Graph, calibration_data: Iterable[np.ndarray]) -> closed_ir.Graph:
     """Mutate `graph` in place: calibrate + quantize every activation
@@ -63,6 +71,8 @@ def _calibrate_activations(graph: closed_ir.Graph, calibration_data: Iterable[np
     for t in graph.inputs:
         tensors_by_name[t.name] = t
     for op in graph.ops:
+        if op.op_type in NON_CALIBRATED_OPS:
+            continue
         for t in op.outputs:
             tensors_by_name[t.name] = t
 

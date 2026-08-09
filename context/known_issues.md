@@ -1,6 +1,6 @@
-# Known Issues — Phases 0–4
+# Known Issues — Phases 0–5
 
-A retrospective log of bugs and gotchas actually hit while *implementing* Phases 0–4, as opposed to `context/phase_*.md`, which are archived copies of the plan documents (intent, written before implementation). Kept separate and up to date so the same mistakes aren't rediscovered in Phase 5/6.
+A retrospective log of bugs and gotchas actually hit while *implementing* Phases 0–5, as opposed to `context/phase_*.md`, which are archived copies of the plan documents (intent, written before implementation). Kept separate and up to date so the same mistakes aren't rediscovered in Phase 6+.
 
 ---
 
@@ -68,9 +68,32 @@ One design decision made here *looked* safe at the time but turned out to be the
 
 ---
 
+## Phase 5, bug — `quantize.py` was spuriously quantizing `ArgMax`'s output
+
+**Symptom:** None observed via a failing test — caught during Phase 5 design review, before any codegen code needed to trust `Tensor.dtype`.
+
+**Root cause:** `quantize.py`'s `_calibrate_activations` collected `tensors_by_name` from *every* op's outputs, including `ArgMax`'s. The final `pred` tensor (a discrete `int64` class index, never meant to be quantized) was getting `.scale`/`.zero_point` set and `.dtype` overwritten to `INT8`. Harmless to Phases 3/4's own tests (nothing downstream consumed `pred`'s quantization metadata), but Phase 5's codegen needs `.dtype` to be trustworthy to know it's emitting an `ArgMax` call, not a requantized activation.
+
+**Fix:** Added a named, extensible `NON_CALIBRATED_OPS = {"ArgMax"}` set in `quantize.py` (not an inline `if op.op_type == "ArgMax"` check), so a future non-calibrated op type is a one-line addition. Regression test: `test_quantize_excludes_argmax_output` in `test_quantize.py`.
+
+## Phase 5, design flaw caught before implementation — a static per-op-type "is terminal" flag doesn't generalize
+
+**What almost shipped:** an `IS_TERMINAL: bool` class attribute on each AVR codegen `Emitter` (`True` for `ArgMaxEmitter`, `False` for `ConvEmitter`/`GemmEmitter`), used by `assemble.py` to decide which op's `call_site` gets wrapped in `return ...;` for `model_forward()`.
+
+**Why it was wrong:** "is this op the graph's final op" is a fact about *graph topology* (which op happens to produce `graph.outputs[-1]` in this particular model), not a fact about the *op type*. A hypothetical regression variant ending in a raw `Gemm` (no `ArgMax` at all) would have `GemmEmitter.IS_TERMINAL` hardcoded to `False` — wrong for that graph, and `assemble.py` would still need *some* op-type-specific branch to handle it, defeating the point of the registry.
+
+**Fix (caught via a reviewer question before writing the code):** moved "where does this op's output go" into `tensor_ref` (built once per graph in `emit_layout.py`, already graph-topology-aware) — it resolves any tensor that's one of `graph.outputs` to the fixed `out_class` output-parameter name, regardless of which op produced it. Every `Emitter.call_site` became a uniform void statement (`ArgMaxEmitter`'s is `*out_class = argmax_i32(...);` instead of a bare return-expression), so `assemble.py` has no per-op-type or per-emitter special-casing at all. `model_forward()`'s signature reverted to `void model_forward(const int8_t *input, uint8_t *out_class)` (an output parameter, matching the reference file's own convention) rather than the initially-simpler-looking `uint8_t model_forward(const int8_t *input)` return-value form, which was the actual root of the problem — it only worked because it implicitly assumed the terminal op always produces a single scalar.
+
+## Phase 5, architecture change touching already-shipped Phase 3 code — kernel/emitter registries
+
+Not a bug, but worth recording since it retroactively modified `interpreter.py`: the first draft of `emit_layout.py` had an `if op.op_type == "Conv": ... elif == "Gemm": ...` block, the same shape of dispatch already present in `interpreter.py`'s `match op.op_type` from Phase 3. Rather than let that pattern re-multiply across every codegen module, introduced per-op-type registries mirroring onnxruntime's kernel-registry pattern: `ctinyml/ops.py`'s target-agnostic `KERNELS` registry (owns shape derivation + float forward eval; `interpreter.py`'s numeric bodies moved here so `ops.py` has no dependency on `interpreter.py`, avoiding a circular import) and `targets/avr/codegen/registry.py`'s AVR-specific `EMITTERS` registry (owns `#define` macros + C call-sites, colocated per op type). `closed_ir.Op`/`Tensor` themselves stay flat dataclasses, not subclassed — the registries live beside the IR, keyed by its plain `op_type` string, not inside it. Full regression run confirmed zero behavior change from the `interpreter.py` refactor.
+
+---
+
 ## Lessons for Phase 5/6 (AVR codegen + runtime)
 
 Both phases generate C code directly from this same `closed_ir.Graph`, so these apply there too:
 
 - **Shape/rank metadata on a `closed_ir.Tensor` is not reliable post-`drop_noop_reshape` for anything rank-sensitive** — only `prod(shape)` (total element count) is trustworthy. Any future codegen touching an op with a rank-sensitive attribute (the way `ArgMax`'s `axis` is) needs the same squeeze-or-recompute treatment applied in `interpreter.py`, not a literal read of `op.attrs["axis"]` against the tensor's stored shape.
 - **Never compare `closed_ir.Tensor`/`Op` objects with `==` or Python's `in` operator on a list of them** — always compare by `is`/`id()`. The dataclasses' default value-equality is both semantically wrong for IR nodes and unsafe once `.data` (a numpy array) is populated.
+- **A fact about *this graph's shape* (e.g. "which op is terminal") is not a fact about an *op type*** — don't encode it as a static per-op-type/per-Emitter class attribute; derive it from the graph (topology, tensor identity) at codegen time instead.

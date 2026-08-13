@@ -76,3 +76,55 @@ def test_full_graph_forward_mnist():
     (output_tensor,) = graph.outputs
     pred = values[output_tensor.name]
     assert 0 <= int(pred) <= 9
+
+
+# --- input_prescale regression (see known_issues.md's Phase 7 entry) ------
+
+# Minimal 1x1 conv graph (weight=[[2.0]], bias=0) so the effect of
+# applying/not-applying input_prescale is trivial to verify by hand:
+# output = weight * (raw_input / prescale).
+
+
+def _single_conv_graph(input_prescale):
+    from ctinyml import closed_ir
+
+    input_tensor = closed_ir.Tensor(name="x", shape=(1, 1, 1, 1), dtype="FLOAT")
+    weight = closed_ir.Tensor(
+        name="w", shape=(1, 1, 1, 1), dtype="FLOAT",
+        data=np.array([[[[2.0]]]], dtype=np.float32), is_initializer=True,
+    )
+    bias = closed_ir.Tensor(
+        name="b", shape=(1,), dtype="FLOAT", data=np.zeros(1, dtype=np.float32), is_initializer=True,
+    )
+    output_tensor = closed_ir.Tensor(name="y", shape=(1, 1, 1, 1), dtype="FLOAT")
+    op = closed_ir.Op(
+        op_type="Conv", name="conv", inputs=[input_tensor, weight, bias], outputs=[output_tensor],
+        attrs={"strides": (1, 1), "pads": (0, 0, 0, 0)},
+    )
+    return closed_ir.Graph(
+        ops=[op], inputs=[input_tensor], outputs=[output_tensor], input_prescale=input_prescale
+    ), input_tensor, output_tensor
+
+
+def test_run_applies_input_prescale_to_computation_but_records_raw_value():
+    graph, input_tensor, output_tensor = _single_conv_graph(input_prescale=255.0)
+    raw = np.array([[[[255.0]]]], dtype=np.float32)
+
+    values = interpreter.run(graph, raw)
+
+    # The tensor recorded/returned under the input's own name stays raw
+    # -- that's the domain quantize.py needs to calibrate the input
+    # tensor's own scale/zero_point against.
+    np.testing.assert_array_equal(values[input_tensor.name], raw)
+    # But what actually flowed into the conv is raw/255 = 1.0, so the
+    # output is 2*1.0 = 2.0, not 2*255 = 510.
+    np.testing.assert_allclose(values[output_tensor.name], [[[[2.0]]]])
+
+
+def test_run_without_input_prescale_uses_raw_value_directly():
+    graph, _input_tensor, output_tensor = _single_conv_graph(input_prescale=None)
+    raw = np.array([[[[255.0]]]], dtype=np.float32)
+
+    values = interpreter.run(graph, raw)
+
+    np.testing.assert_allclose(values[output_tensor.name], [[[[510.0]]]])

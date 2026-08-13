@@ -8,88 +8,22 @@ these real kernels.
 """
 
 import ctypes
-import shutil
-import subprocess
-from pathlib import Path
 
 import numpy as np
 import pytest
 
-RUNTIME_DIR = Path(__file__).parent.parent / "ctinyml" / "targets" / "avr" / "runtime"
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
-
-GCC = shutil.which("gcc")
-
-_CONV_ARGTYPES = [
-    ctypes.POINTER(ctypes.c_int8),
-    ctypes.c_uint8,
-    ctypes.c_uint8,
-    ctypes.c_uint8,
-    ctypes.c_int8,
-    ctypes.POINTER(ctypes.c_int8),
-    ctypes.POINTER(ctypes.c_int32),
-    ctypes.POINTER(ctypes.c_float),
-    ctypes.c_uint8,
-    ctypes.c_uint8,
-    ctypes.c_uint8,
-    ctypes.c_uint8,
-    ctypes.POINTER(ctypes.c_int8),
-    ctypes.c_uint8,
-    ctypes.c_uint8,
-    ctypes.c_int8,
-    ctypes.c_uint8,
-]
-
-_DENSE_ARGTYPES_PORTED = [
-    ctypes.POINTER(ctypes.c_int8),
-    ctypes.c_uint16,
-    ctypes.c_int8,
-    ctypes.POINTER(ctypes.c_int8),
-    ctypes.POINTER(ctypes.c_int32),
-    ctypes.POINTER(ctypes.c_float),
-    ctypes.c_uint16,
-    ctypes.c_void_p,
-    ctypes.c_int8,
-    ctypes.c_uint8,
-    ctypes.c_uint8,
-]
-
-_DENSE_ARGTYPES_REFERENCE = [
-    ctypes.POINTER(ctypes.c_int8),
-    ctypes.c_uint16,
-    ctypes.c_int8,
-    ctypes.POINTER(ctypes.c_int8),
-    ctypes.POINTER(ctypes.c_int32),
-    ctypes.POINTER(ctypes.c_float),
-    ctypes.c_uint16,
-    ctypes.POINTER(ctypes.c_int8),
-    ctypes.c_int8,
-    ctypes.c_uint8,
-]
-
-
-def _i8p(arr: np.ndarray):
-    return arr.ctypes.data_as(ctypes.POINTER(ctypes.c_int8))
-
-
-def _i32p(arr: np.ndarray):
-    return arr.ctypes.data_as(ctypes.POINTER(ctypes.c_int32))
-
-
-def _f32p(arr: np.ndarray):
-    return arr.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-
-
-def _compile_dll(build_dir: Path, source: Path, include_dirs: list[Path], dll_name: str) -> Path:
-    dll_path = build_dir / dll_name
-    cmd = [GCC, "-shared", "-std=c11", "-Wall", "-Wextra", "-Wl,--export-all-symbols"]
-    for inc in include_dirs:
-        cmd += ["-I", str(inc)]
-    cmd += [str(source), "-o", str(dll_path)]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
-    assert result.stderr == "", result.stderr
-    return dll_path
+from tests.fixtures.dll_compile import (
+    CONV_ARGTYPES,
+    DENSE_ARGTYPES_PORTED,
+    DENSE_ARGTYPES_REFERENCE,
+    FIXTURES_DIR,
+    GCC,
+    RUNTIME_DIR,
+    compile_dll,
+    f32p as _f32p,
+    i8p as _i8p,
+    i32p as _i32p,
+)
 
 
 @pytest.fixture(scope="module")
@@ -101,16 +35,16 @@ def build_dir(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def ported_lib(build_dir):
-    dll = _compile_dll(
+    dll = compile_dll(
         build_dir,
         FIXTURES_DIR / "runtime_shim_ported.c",
         [RUNTIME_DIR],
         "ported.dll",
     )
     lib = ctypes.CDLL(str(dll))
-    lib.test_conv2d_int8.argtypes = _CONV_ARGTYPES
+    lib.test_conv2d_int8.argtypes = CONV_ARGTYPES
     lib.test_conv2d_int8.restype = None
-    lib.test_dense_int8.argtypes = _DENSE_ARGTYPES_PORTED
+    lib.test_dense_int8.argtypes = DENSE_ARGTYPES_PORTED
     lib.test_dense_int8.restype = None
     lib.test_argmax_i32.argtypes = [ctypes.POINTER(ctypes.c_int32), ctypes.c_uint16]
     lib.test_argmax_i32.restype = ctypes.c_uint8
@@ -125,16 +59,16 @@ def ported_lib(build_dir):
 
 @pytest.fixture(scope="module")
 def reference_lib(build_dir):
-    dll = _compile_dll(
+    dll = compile_dll(
         build_dir,
         FIXTURES_DIR / "runtime_shim_reference.c",
         [FIXTURES_DIR],
         "reference.dll",
     )
     lib = ctypes.CDLL(str(dll))
-    lib.test_conv2d_int8.argtypes = _CONV_ARGTYPES
+    lib.test_conv2d_int8.argtypes = CONV_ARGTYPES
     lib.test_conv2d_int8.restype = None
-    lib.test_dense_int8.argtypes = _DENSE_ARGTYPES_REFERENCE
+    lib.test_dense_int8.argtypes = DENSE_ARGTYPES_REFERENCE
     lib.test_dense_int8.restype = None
     return lib
 
@@ -374,7 +308,7 @@ def test_generated_model_runs_against_real_kernels(build_dir):
     model_c_path = build_dir / "model_e2e.c"
     model_c_path.write_text(header_includes + model_c)
 
-    dll = _compile_dll(build_dir, model_c_path, [RUNTIME_DIR], "model_e2e.dll")
+    dll = compile_dll(build_dir, model_c_path, [RUNTIME_DIR], "model_e2e.dll")
     lib = ctypes.CDLL(str(dll))
     lib.model_forward.argtypes = [ctypes.POINTER(ctypes.c_int8), ctypes.POINTER(ctypes.c_uint8)]
     lib.model_forward.restype = None

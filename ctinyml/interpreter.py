@@ -25,10 +25,31 @@ def run(graph: closed_ir.Graph, input_array: np.ndarray) -> dict[str, np.ndarray
     quantize.py's calibration step needs.
     """
     (input_tensor,) = graph.inputs
-    values: dict[str, np.ndarray] = {input_tensor.name: np.asarray(input_array, dtype=np.float32)}
+    raw_input = np.asarray(input_array, dtype=np.float32)
+    values: dict[str, np.ndarray] = {input_tensor.name: raw_input}
+
+    # graph.inputs[0] is in the *raw* domain (e.g. camera-sensor byte
+    # values) -- fold_div_into_quant.py (Phase 2) recorded input_prescale
+    # but structurally removed the division that used to happen before
+    # the first op, and nothing applied it since, silently feeding the
+    # trained weights un-normalized input (see known_issues.md's Phase 7
+    # entry -- this was a real, previously-undetected bug). Applying it
+    # here, once, at the point where the input value actually flows into
+    # computation -- while still recording the *raw* value under
+    # input_tensor.name above, since that's the domain quantize.py needs
+    # to calibrate the input tensor's own scale/zero_point against (it's
+    # what the real device's int8 input actually represents).
+    scaled_input = raw_input / graph.input_prescale if graph.input_prescale else raw_input
 
     for op in graph.ops:
-        inputs = [values[t.name] if t.data is None else t.data for t in op.inputs]
+        inputs = []
+        for t in op.inputs:
+            if t.data is not None:
+                inputs.append(t.data)
+            elif t is input_tensor:
+                inputs.append(scaled_input)
+            else:
+                inputs.append(values[t.name])
 
         kernel = KERNELS.get(op.op_type)
         if kernel is None:

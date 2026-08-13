@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "scikit-learn", "pyserial"]
 
 [tool.setuptools.packages.find]
 include = ["ctinyml*", "tools*"]

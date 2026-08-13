@@ -16,8 +16,10 @@ from ctinyml.passes.quantize import (
     QMIN,
     _asymmetric_qparams,
     _calibrate_activations,
+    _effective_input_scale,
     _requant_multiplier,
     quantize,
+    quantize_input,
 )
 from tests.fixtures import synthetic
 
@@ -99,7 +101,7 @@ def test_weight_quantization_symmetric_per_channel():
 
     from ctinyml.passes.quantize import _quantize_weight_and_bias
 
-    weight_scale = _quantize_weight_and_bias(op, input_tensor)
+    weight_scale = _quantize_weight_and_bias(op, input_tensor.scale)
 
     assert weight_tensor.zero_point == 0
     assert weight_tensor.data.dtype == np.int8
@@ -216,3 +218,59 @@ def test_quantize_excludes_argmax_output():
     assert output_tensor.dtype == "INT64"
     assert output_tensor.scale is None
     assert output_tensor.zero_point is None
+
+
+def test_effective_input_scale_folds_prescale_for_the_graph_input():
+    # Regression test (see known_issues.md's Phase 7 entry): the graph
+    # input's own scale is calibrated on the raw domain, but the first
+    # op's weights expect the normalized (pre-fold_div_into_quant)
+    # domain -- dividing by input_prescale reconstructs it.
+    from ctinyml import closed_ir
+
+    graph_input = closed_ir.Tensor(name="x", shape=(1,), dtype="INT8", scale=1.0, zero_point=0)
+    graph = closed_ir.Graph(ops=[], inputs=[graph_input], outputs=[], input_prescale=255.0)
+
+    assert _effective_input_scale(graph, graph_input, graph_input) == pytest.approx(1.0 / 255.0)
+
+
+def test_effective_input_scale_unaffected_without_prescale():
+    from ctinyml import closed_ir
+
+    graph_input = closed_ir.Tensor(name="x", shape=(1,), dtype="INT8", scale=1.0, zero_point=0)
+    graph = closed_ir.Graph(ops=[], inputs=[graph_input], outputs=[], input_prescale=None)
+
+    assert _effective_input_scale(graph, graph_input, graph_input) == pytest.approx(1.0)
+
+
+def test_effective_input_scale_unaffected_for_intermediate_activations():
+    # An op consuming an intermediate activation (not the graph's own
+    # input) is never affected, regardless of input_prescale.
+    from ctinyml import closed_ir
+
+    graph_input = closed_ir.Tensor(name="x", shape=(1,), dtype="INT8", scale=1.0, zero_point=0)
+    intermediate = closed_ir.Tensor(name="mid", shape=(1,), dtype="INT8", scale=3.0, zero_point=0)
+    graph = closed_ir.Graph(ops=[], inputs=[graph_input], outputs=[], input_prescale=255.0)
+
+    assert _effective_input_scale(graph, graph_input, intermediate) == pytest.approx(3.0)
+
+
+def test_quantize_input_reproduces_calibrated_boundaries():
+    from ctinyml import closed_ir
+
+    tensor = closed_ir.Tensor(name="in", shape=(1,), dtype="INT8")
+    scale, zero_point = _asymmetric_qparams(-2.0, 5.0)
+    tensor.scale, tensor.zero_point = scale, zero_point
+
+    lo_q = quantize_input(np.array([-2.0], dtype=np.float32), tensor)
+    hi_q = quantize_input(np.array([5.0], dtype=np.float32), tensor)
+
+    assert int(lo_q[0]) == QMIN
+    assert int(hi_q[0]) == QMAX
+
+
+def test_quantize_input_requires_calibrated_tensor():
+    from ctinyml import closed_ir
+
+    tensor = closed_ir.Tensor(name="in", shape=(1,), dtype="FLOAT")
+    with pytest.raises(ValueError, match="no calibrated"):
+        quantize_input(np.array([1.0], dtype=np.float32), tensor)

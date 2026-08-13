@@ -5,14 +5,26 @@ Call `drop_final_requant.apply(graph)` before this — `quantize()` relies
 on `skip_requant` already being set on the op that feeds ArgMax.
 
 Calibration data is a plain iterable of preprocessed input arrays (e.g.
-a numpy array of shape [N, 1, 28, 28], or any generator yielding
-individual/batched inputs) -- just `for x in calibration_data: ...` over
-whatever a caller has in-process; no reader-class protocol. It's expected
-in the same domain as the closed IR's declared graph input, i.e. the
-*pre-Div* domain (see the fold_div_into_quant docstring) -- Phase 2
-already removed the runtime division, so calibrating directly on that
-domain is what "folds input_prescale into layer-1's input scale" in
-practice: there's no separate multiply-by-input_prescale step here.
+individual arrays of shape [1, 1, 28, 28], or any generator yielding
+them) -- just `for x in calibration_data: ...` over whatever a caller
+has in-process; no reader-class protocol. It's expected in the same
+*raw*, pre-Div domain as the closed IR's declared graph input (see the
+fold_div_into_quant docstring) -- e.g. actual [0,255] pixel bytes, not
+pre-normalized [0,1] values.
+
+`input_prescale` (folded by Phase 2, recorded on `graph.input_prescale`)
+is *not* applied as a runtime division anywhere -- the whole point of
+folding it was to avoid one. It still has to be accounted for
+mathematically, though: the graph input tensor's own scale/zero_point
+are (correctly) calibrated against the raw domain (matching what the
+real device's int8 input represents), but the trained weights expect
+the *normalized* domain. `_effective_input_scale` below divides the
+raw-calibrated scale by `input_prescale` specifically when quantizing
+the op that consumes the graph's input directly, reconstructing the
+value the weights actually expect without ever running a division on
+device. `interpreter.py` has the matching fix on the float-reference
+side (applies the division only to what flows into computation, not to
+what gets calibrated).
 """
 
 from __future__ import annotations
@@ -45,13 +57,14 @@ def quantize(graph: closed_ir.Graph, calibration_data: Iterable[np.ndarray]) -> 
     `graph` for chaining.
     """
     _calibrate_activations(graph, calibration_data)
+    (graph_input,) = graph.inputs
 
     for op in graph.ops:
         if op.op_type not in ("Conv", "Gemm"):
             continue
 
-        input_tensor = op.inputs[0]
-        weight_scale = _quantize_weight_and_bias(op, input_tensor)
+        input_scale = _effective_input_scale(graph, graph_input, op.inputs[0])
+        weight_scale = _quantize_weight_and_bias(op, input_scale)
         (output_tensor,) = op.outputs
 
         if op.attrs.get("skip_requant"):
@@ -60,10 +73,40 @@ def quantize(graph: closed_ir.Graph, calibration_data: Iterable[np.ndarray]) -> 
             output_tensor.dtype = "INT32"
         else:
             op.attrs["requant_mult"] = _requant_multiplier(
-                input_tensor.scale, weight_scale, output_tensor.scale
+                input_scale, weight_scale, output_tensor.scale
             )
 
     return graph
+
+
+def _effective_input_scale(
+    graph: closed_ir.Graph, graph_input: closed_ir.Tensor, input_tensor: closed_ir.Tensor
+) -> float:
+    """The scale to use when reconstructing `input_tensor`'s float value
+    for quantization math. Ordinarily just `input_tensor.scale` --
+    except when `input_tensor` *is* the graph's own declared input,
+    which is calibrated against the raw, pre-Div domain (matching what
+    the real device's int8 input represents), not the normalized domain
+    the trained weights expect. Dividing by `graph.input_prescale`
+    reconstructs the normalized value without ever running a division
+    on device -- see the module docstring.
+    """
+    if input_tensor is graph_input and graph.input_prescale:
+        return input_tensor.scale / graph.input_prescale
+    return input_tensor.scale
+
+
+def quantize_input(image: np.ndarray, tensor: closed_ir.Tensor) -> np.ndarray:
+    """Quantize a raw float image/array to int8 using `tensor`'s
+    already-calibrated scale/zero_point (e.g. `graph.inputs[0]` after
+    `quantize()` has run). Reusable beyond testing -- any future
+    inference/deployment path needs exactly this to prepare a real input
+    for the compiled model.
+    """
+    if tensor.scale is None or tensor.zero_point is None:
+        raise ValueError(f"tensor {tensor.name!r} has no calibrated scale/zero_point.")
+    q = _round_half_away_from_zero(image / tensor.scale) + tensor.zero_point
+    return np.clip(q, QMIN, QMAX).astype(np.int8)
 
 
 def _calibrate_activations(graph: closed_ir.Graph, calibration_data: Iterable[np.ndarray]) -> None:
@@ -106,10 +149,12 @@ def _asymmetric_qparams(lo: float, hi: float) -> tuple[float, int]:
     return scale, zero_point
 
 
-def _quantize_weight_and_bias(op: closed_ir.Op, input_tensor: closed_ir.Tensor) -> np.ndarray:
+def _quantize_weight_and_bias(op: closed_ir.Op, input_scale: float) -> np.ndarray:
     """Quantize op.inputs[1] (weight) and op.inputs[2] (bias) in place,
     per-output-channel (axis 0), symmetric (zero_point 0) for the
-    weight. Returns the weight's per-channel scale array.
+    weight. `input_scale` is the *effective* input scale (see
+    `_effective_input_scale`), not necessarily `op.inputs[0].scale`
+    directly. Returns the weight's per-channel scale array.
     """
     weight, bias = op.inputs[1], op.inputs[2]
     reduce_axes = tuple(range(1, weight.data.ndim))
@@ -127,7 +172,7 @@ def _quantize_weight_and_bias(op: closed_ir.Op, input_tensor: closed_ir.Tensor) 
     weight.zero_point = 0
     weight.dtype = "INT8"
 
-    bias_scale = input_tensor.scale * weight_scale
+    bias_scale = input_scale * weight_scale
     bias_int32 = _round_half_away_from_zero(bias.data / bias_scale).astype(np.int32)
 
     bias.data = bias_int32

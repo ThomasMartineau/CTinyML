@@ -22,7 +22,7 @@ from ctinyml.passes.buffer_planner import plan
 from ctinyml.passes.convert_to_closed_ir import convert
 from ctinyml.passes.drop_final_requant import apply as drop_final_requant
 from ctinyml.passes.quantize import quantize, quantize_input
-from ctinyml.targets.avr.codegen.assemble import generate_model_c
+from ctinyml.targets.avr.codegen.assemble import MODEL_C_PRELUDE, generate_model_c
 from tests.fixtures.dll_compile import (
     FIXTURES_DIR,
     GCC,
@@ -81,16 +81,8 @@ def pipeline(build_dir, holdout_data):
     buffer_plan = plan(quant_graph)
     model_c = generate_model_c(quant_graph, buffer_plan)
 
-    header_includes = (
-        "#include <stdint.h>\n"
-        '#include "pgm_read_f32.h"\n'
-        '#include "qmath.h"\n'
-        '#include "conv2d_direct.h"\n'
-        '#include "gemm.h"\n'
-        '#include "argmax.h"\n\n'
-    )
     model_c_path: Path = build_dir / "model_e2e_validation.c"
-    model_c_path.write_text(header_includes + model_c)
+    model_c_path.write_text(MODEL_C_PRELUDE + model_c)
 
     model_dll = compile_dll(build_dir, model_c_path, [RUNTIME_DIR], "model_e2e_validation.dll")
     model_lib = ctypes.CDLL(str(model_dll))

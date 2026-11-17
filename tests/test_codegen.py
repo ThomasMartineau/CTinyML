@@ -15,7 +15,7 @@ from ctinyml.passes.convert_to_closed_ir import convert
 from ctinyml.passes.drop_final_requant import apply as drop_final_requant
 from ctinyml.passes.quantize import quantize
 from ctinyml.targets.avr.codegen import base, emit_layout, emit_weights
-from ctinyml.targets.avr.codegen.assemble import generate_model_c
+from ctinyml.targets.avr.codegen.assemble import MODEL_C_PRELUDE, generate_model_c
 from ctinyml.targets.avr.codegen.emit_conv2d import ConvEmitter
 from ctinyml.targets.avr.codegen.emit_gemm import GemmEmitter
 from ctinyml.targets.avr.codegen.errors import CodegenError
@@ -125,15 +125,7 @@ def test_generate_model_c_compiles_against_stub_headers(tmp_path):
     graph, buffer_plan = _mnist_quantized()
     model_c = generate_model_c(graph, buffer_plan)
 
-    header_includes = (
-        "#include <stdint.h>\n"
-        '#include "pgm_read_f32.h"\n'
-        '#include "qmath.h"\n'
-        '#include "conv2d_direct.h"\n'
-        '#include "gemm.h"\n'
-        '#include "argmax.h"\n\n'
-    )
-    (tmp_path / "model.c").write_text(header_includes + model_c)
+    (tmp_path / "model.c").write_text(MODEL_C_PRELUDE + model_c)
 
     for header in RUNTIME_HEADERS_DIR.glob("*.h"):
         (tmp_path / header.name).write_text(header.read_text())

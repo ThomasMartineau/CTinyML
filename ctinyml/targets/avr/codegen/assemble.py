@@ -10,6 +10,15 @@ from ctinyml.targets.avr.codegen import emit_layout, emit_weights
 from ctinyml.targets.avr.codegen.errors import CodegenError
 from ctinyml.targets.avr.codegen.registry import EMITTERS
 
+MODEL_C_PRELUDE = (
+    "#include <stdint.h>\n"
+    '#include "pgm_read_f32.h"\n'
+    '#include "qmath.h"\n'
+    '#include "conv2d_direct.h"\n'
+    '#include "gemm.h"\n'
+    '#include "argmax.h"\n\n'
+)
+
 
 def generate_model_c(graph: closed_ir.Graph, buffer_plan: BufferPlan) -> str:
     layout_text, ctx = emit_layout.generate(graph, buffer_plan)

@@ -13,8 +13,23 @@ dependencies = [
     "numpy",
 ]
 
+[project.scripts]
+ctinyml = "tools.cli:main"
+
 [project.optional-dependencies]
-dev = ["pytest", "scikit-learn", "pyserial"]
+dev = [
+    "pytest", 
+    "pandas",
+    "matplotlib",
+    "torch",
+    "lightning",
+    "scikit-learn", 
+    "onnxscript",
+    "pyserial", 
+    "ipykernel",
+    "jupyter",
+    "notebook",
+    ]
 
 [tool.setuptools.packages.find]
 include = ["ctinyml*", "tools*"]

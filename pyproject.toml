@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ctinyml"
+version = "0.0.1"
+description = "ONNX -> C compiler, AVR-first (Arduino Mega 2560 target)."
+requires-python = ">=3.11"
+dependencies = [
+    "onnx",
+    "onnx-ir",
+    "numpy",
+]
+
+[project.scripts]
+ctinyml = "tools.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest", 
+    "pandas",
+    "matplotlib",
+    "torch",
+    "lightning",
+    "scikit-learn", 
+    "onnxscript",
+    "pyserial", 
+    "ipykernel",
+    "jupyter",
+    "notebook",
+    ]
+
+[tool.setuptools.packages.find]
+include = ["ctinyml*", "tools*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

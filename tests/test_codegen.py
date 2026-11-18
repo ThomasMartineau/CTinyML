@@ -29,10 +29,10 @@ def _mnist_quantized():
     drop_final_requant(graph)
     rng = np.random.default_rng(0)
     calibration_data = [
-        rng.uniform(0, 255, size=(1, 1, 28, 28)).astype(np.float32) for _ in range(8)
+        rng.uniform(0, 1, size=(1, 1, 28, 28)).astype(np.float32) for _ in range(8)
     ]
     calibration_data.append(np.zeros((1, 1, 28, 28), dtype=np.float32))
-    calibration_data.append(np.full((1, 1, 28, 28), 255.0, dtype=np.float32))
+    calibration_data.append(np.full((1, 1, 28, 28), 1.0, dtype=np.float32))
     quantize(graph, calibration_data)
     buffer_plan = plan(graph)
     return graph, buffer_plan

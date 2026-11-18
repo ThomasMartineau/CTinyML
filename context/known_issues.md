@@ -98,6 +98,8 @@ Every hand-computed kernel test (`conv2d_int8` boundary/rounding/zero-point case
 
 ## Phase 7, bug (major) — `input_prescale` was recorded but never actually applied anywhere
 
+> **Superseded:** `input_prescale`, `fold_div_into_quant.py` and `_effective_input_scale` have since been removed. The graph input is now a float in [0, 1] with a fixed INT8 encoding (scale 1/255, zero point -128; see the `passes/quantize.py` docstring), so there is no prescale left to forget to apply. The entry below is kept as history.
+
 **Symptom:** Phase 7's primary acceptance test (argmax match rate between the C model and the float interpreter, on real MNIST images) came in at 93% — just under the 95% gate. That alone looked like ordinary quantization noise. But the *diagnostic* true-label-accuracy check told the real story: the float interpreter itself only got **55%** right against ground truth, and the C path **50%** — against the notebook's own reported **97.8%** test accuracy for this exact trained model. Something was fundamentally broken, not just borderline.
 
 **How it was isolated (bisection, not guesswork):**

@@ -26,7 +26,7 @@ def _mnist_quantized_closed_ir():
     drop_final_requant(graph)
     rng = np.random.default_rng(0)
     calibration_data = [
-        rng.uniform(0, 255, size=(1, 1, 28, 28)).astype(np.float32) for _ in range(8)
+        rng.uniform(0, 1, size=(1, 1, 28, 28)).astype(np.float32) for _ in range(8)
     ]
     quantize(graph, calibration_data)
     return graph

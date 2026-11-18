@@ -16,7 +16,12 @@ import onnx_ir
 
 # The only ops this compiler's backend understands, per
 # context/implementation_plan.md Phase 1.
-SUPPORTED_OPS = {"Div", "Conv", "Relu", "Reshape", "Gemm", "ArgMax"}
+#
+# Input contract: the graph input is a float in [0, 1] (a leading Div(255)
+# is *not* supported -- the fixed INT8 input encoding in passes/quantize.py
+# already is that /255). Any other input scaling must be folded into the
+# first layer's weights before the model reaches this compiler.
+SUPPORTED_OPS = {"Conv", "Relu", "Reshape", "Gemm", "ArgMax"}
 
 
 class FrontendError(ValueError):

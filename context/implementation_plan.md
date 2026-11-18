@@ -1,7 +1,7 @@
 # CTinyML — Implementation Plan (ONNX→C, AVR-first)
 
 **Target:** Arduino Mega 2560 (ATmega2560) — 248 KB usable flash, 8 KB SRAM, no FPU, no dynamic allocation.
-**Input model:** `mnist_classifier.onnx` — Div(norm) → Conv(6,1,3,3,s2,p1) → ReLU → Conv(6,6,3,3,s2,p1) → ReLU → Reshape → Gemm(10,294) → Reshape → ArgMax.
+**Input model:** `mnist_classifier.onnx` — (originally Div(norm) →; now a float [0, 1] input, see note below) Conv(6,1,3,3,s2,p1) → ReLU → Conv(6,6,3,3,s2,p1) → ReLU → Reshape → Gemm(10,294) → Reshape → ArgMax.
 **Confirmed architecture decisions** (see summary below) are locked; this plan sequences implementation for Claude Code to execute against, phase by phase, each with its own acceptance test before moving on.
 
 ---

@@ -6,11 +6,11 @@
 // Protocol, 115200 baud:
 //   1. Board sends "READY\n" once, right after setup() completes.
 //   2. Host sends: 1 sync byte (0xAA) + 784 int8 bytes -- a single
-//      pre-quantized MNIST image, row-major, byte-for-byte what
-//      model_forward()'s `input` parameter expects (see
-//      ctinyml.passes.quantize.quantize_input() on the host side --
-//      the board does zero quantization work, it only ever sees
-//      already-quantized int8 bytes).
+//      pre-encoded MNIST image, row-major, byte-for-byte what
+//      model_forward()'s `input` parameter expects: the compiler's fixed
+//      INT8 input encoding (scale 1/255, zero_point -128), i.e. uint8
+//      pixel - 128. The board does zero quantization work, it only ever
+//      sees already-encoded int8 bytes.
 //   3. Board replies with exactly 1 byte: the predicted class (0-9).
 //   4. Repeat from step 2 for as many images as the host wants to send.
 //

@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     compile_parser.add_argument(
         "--calibration",
         required=True,
-        help="Calibration images (.npz with 'calibration_images', or .npy), raw [0, 255].",
+        help="Calibration images (.npz with 'calibration_images', or .npy), floats in [0, 1].",
     )
     compile_parser.add_argument(
         "-o", "--output", required=True, help="Output directory for generated C source."
@@ -44,7 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _load_calibration(path: str) -> np.ndarray:
-    """Loads raw [0, 255] calibration images; each sample is (1, C, H, W)."""
+    """Loads float [0, 1] calibration images; each sample is (1, C, H, W)."""
     loaded = np.load(path)
     if isinstance(loaded, np.lib.npyio.NpzFile):
         if "calibration_images" not in loaded.files:
@@ -56,6 +56,11 @@ def _load_calibration(path: str) -> np.ndarray:
         images = images[:, np.newaxis]
     if images.ndim != 4 or images.shape[0] == 0:
         raise ValueError(f"{path}: expected calibration images of shape (N, H, W) or (N, C, H, W)")
+    if images.min() < 0.0 or images.max() > 1.0:
+        raise ValueError(
+            f"{path}: calibration images must be floats in [0, 1] (got range "
+            f"[{images.min():g}, {images.max():g}]); divide raw 0-255 pixels by 255"
+        )
     return images[:, np.newaxis]  # per-sample batch axis, as quantize() expects
 
 

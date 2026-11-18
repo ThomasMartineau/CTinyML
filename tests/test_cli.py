@@ -51,6 +51,16 @@ def test_compile_bad_calibration_fails(tmp_path):
     assert "calibration_images" in result.stderr
 
 
+def test_compile_rejects_raw_0_255_calibration(tmp_path):
+    raw = tmp_path / "raw.npz"
+    np.savez(raw, calibration_images=np.full((2, 1, 28, 28), 255.0, dtype=np.float32))
+    result = _run(
+        str(MNIST_FIXTURE), "--target", "avr", "--calibration", str(raw), "-o", str(tmp_path / "o")
+    )
+    assert result.returncode == 1
+    assert "[0, 1]" in result.stderr
+
+
 def test_compile_requires_calibration(tmp_path):
     result = _run(str(MNIST_FIXTURE), "--target", "avr", "-o", str(tmp_path))
     assert result.returncode != 0

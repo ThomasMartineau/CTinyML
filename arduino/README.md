@@ -32,8 +32,10 @@ The IDE compiles `model.c` automatically because it sits in the sketch folder, a
 2. Host sends one sync byte `0xAA`, then 784 pre-quantized int8 pixels (row-major).
 3. Board replies with one byte: the predicted class (0-9).
 
-The board does no quantization. The host quantizes with the model's input scale and zero point, so
-`tools/serial_infer.py` must be built from the same model and calibration data as the flashed `model.c`.
+The board does no quantization, and neither does the host: the compiler's input is a float in [0, 1]
+with a fixed INT8 encoding (scale 1/255, zero point -128), so a uint8 pixel is just `pixel - 128`.
+`tools/serial_infer.py` sends the `eval_images_int8` array from `tests/fixtures/mnist_holdout.npz`
+exactly as stored.
 
 ## Regenerate `model.c` and the headers
 

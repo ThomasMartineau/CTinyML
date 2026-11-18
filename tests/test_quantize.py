@@ -12,11 +12,12 @@ from ctinyml.passes.drop_final_requant import apply as drop_final_requant
 from ctinyml.passes.errors import ClosedIRPassError
 from ctinyml.passes.onnx_ir_passes.fuse_relu import FuseReluPass
 from ctinyml.passes.quantize import (
+    INPUT_SCALE,
+    INPUT_ZERO_POINT,
     QMAX,
     QMIN,
     _asymmetric_qparams,
     _calibrate_activations,
-    _effective_input_scale,
     _requant_multiplier,
     quantize,
     quantize_input,
@@ -141,9 +142,8 @@ def test_drop_final_requant_requires_argmax():
 
 
 def test_calibrate_activations_on_synthetic_graph(tmp_path):
-    # conv_relu_graph has no Div node, so run only the passes it needs
-    # (fuse_relu) rather than the full run_structural_passes, which
-    # requires one (see test_passes.py::test_fold_div_into_quant_requires_div).
+    # Run only the pass this synthetic graph needs (fuse_relu) rather
+    # than the full run_structural_passes.
     model = load_model(synthetic.conv_relu_graph(tmp_path))
     model = FuseReluPass()(model).model
     graph = convert(model)
@@ -155,9 +155,22 @@ def test_calibrate_activations_on_synthetic_graph(tmp_path):
 
     _calibrate_activations(graph, [low_sample, mid_sample, high_sample])
 
-    expected_scale, expected_zero_point = _asymmetric_qparams(-3.0, 5.0)
-    assert graph.inputs[0].scale == pytest.approx(expected_scale)
-    assert graph.inputs[0].zero_point == expected_zero_point
+    # The graph input is not calibrated: it always gets the fixed [0, 1] -> int8
+    # encoding (scale 1/255, zp -128), whatever range the data spans.
+    assert graph.inputs[0].scale == pytest.approx(INPUT_SCALE) == pytest.approx(1.0 / 255.0)
+    assert graph.inputs[0].zero_point == INPUT_ZERO_POINT == -128
+    assert graph.inputs[0].dtype == "INT8"
+
+
+def test_quantize_input_maps_uint8_pixels_to_pixel_minus_128(tmp_path):
+    model = load_model(synthetic.conv_relu_graph(tmp_path))
+    graph = convert(FuseReluPass()(model).model)
+    _calibrate_activations(graph, [np.zeros(graph.inputs[0].shape, dtype=np.float32)])
+
+    pixels = np.arange(256)
+    quantized = quantize_input((pixels / 255.0).astype(np.float32), graph.inputs[0])
+
+    np.testing.assert_array_equal(quantized, (pixels - 128).astype(np.int8))
 
 
 # --- full pipeline on the real model ---------------------------------------
@@ -169,10 +182,10 @@ def test_quantize_end_to_end_mnist():
 
     rng = np.random.default_rng(0)
     calibration_data = [
-        rng.uniform(0, 255, size=(1, 1, 28, 28)).astype(np.float32) for _ in range(8)
+        rng.uniform(0, 1, size=(1, 1, 28, 28)).astype(np.float32) for _ in range(8)
     ]
     calibration_data.append(np.zeros((1, 1, 28, 28), dtype=np.float32))
-    calibration_data.append(np.full((1, 1, 28, 28), 255.0, dtype=np.float32))
+    calibration_data.append(np.full((1, 1, 28, 28), 1.0, dtype=np.float32))
 
     quantize(graph, calibration_data)
 
@@ -210,7 +223,7 @@ def test_quantize_excludes_argmax_output():
     drop_final_requant(graph)
     rng = np.random.default_rng(0)
     calibration_data = [
-        rng.uniform(0, 255, size=(1, 1, 28, 28)).astype(np.float32) for _ in range(8)
+        rng.uniform(0, 1, size=(1, 1, 28, 28)).astype(np.float32) for _ in range(8)
     ]
     quantize(graph, calibration_data)
 
@@ -218,40 +231,6 @@ def test_quantize_excludes_argmax_output():
     assert output_tensor.dtype == "INT64"
     assert output_tensor.scale is None
     assert output_tensor.zero_point is None
-
-
-def test_effective_input_scale_folds_prescale_for_the_graph_input():
-    # Regression test (see known_issues.md's Phase 7 entry): the graph
-    # input's own scale is calibrated on the raw domain, but the first
-    # op's weights expect the normalized (pre-fold_div_into_quant)
-    # domain -- dividing by input_prescale reconstructs it.
-    from ctinyml import closed_ir
-
-    graph_input = closed_ir.Tensor(name="x", shape=(1,), dtype="INT8", scale=1.0, zero_point=0)
-    graph = closed_ir.Graph(ops=[], inputs=[graph_input], outputs=[], input_prescale=255.0)
-
-    assert _effective_input_scale(graph, graph_input, graph_input) == pytest.approx(1.0 / 255.0)
-
-
-def test_effective_input_scale_unaffected_without_prescale():
-    from ctinyml import closed_ir
-
-    graph_input = closed_ir.Tensor(name="x", shape=(1,), dtype="INT8", scale=1.0, zero_point=0)
-    graph = closed_ir.Graph(ops=[], inputs=[graph_input], outputs=[], input_prescale=None)
-
-    assert _effective_input_scale(graph, graph_input, graph_input) == pytest.approx(1.0)
-
-
-def test_effective_input_scale_unaffected_for_intermediate_activations():
-    # An op consuming an intermediate activation (not the graph's own
-    # input) is never affected, regardless of input_prescale.
-    from ctinyml import closed_ir
-
-    graph_input = closed_ir.Tensor(name="x", shape=(1,), dtype="INT8", scale=1.0, zero_point=0)
-    intermediate = closed_ir.Tensor(name="mid", shape=(1,), dtype="INT8", scale=3.0, zero_point=0)
-    graph = closed_ir.Graph(ops=[], inputs=[graph_input], outputs=[], input_prescale=255.0)
-
-    assert _effective_input_scale(graph, graph_input, intermediate) == pytest.approx(3.0)
 
 
 def test_quantize_input_reproduces_calibrated_boundaries():
@@ -274,3 +253,18 @@ def test_quantize_input_requires_calibrated_tensor():
     tensor = closed_ir.Tensor(name="in", shape=(1,), dtype="FLOAT")
     with pytest.raises(ValueError, match="no calibrated"):
         quantize_input(np.array([1.0], dtype=np.float32), tensor)
+
+
+def test_holdout_int8_images_match_the_compilers_input_encoding():
+    # tests/fixtures/mnist_holdout.npz stores the exact bytes the board
+    # consumes (`eval_images_int8`, = pixel - 128) next to the float [0, 1]
+    # images. tools/serial_infer.py sends them as-is, so they must never
+    # drift from the compiler's fixed input encoding.
+    holdout = np.load(Path(__file__).parent / "fixtures" / "mnist_holdout.npz")
+    graph = _mnist_closed_ir()
+    quantize(graph, holdout["calibration_images"][:, np.newaxis])
+
+    expected = quantize_input(holdout["eval_images"], graph.inputs[0])
+
+    assert holdout["eval_images_int8"].dtype == np.int8
+    np.testing.assert_array_equal(holdout["eval_images_int8"], expected)

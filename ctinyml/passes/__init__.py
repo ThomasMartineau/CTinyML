@@ -13,7 +13,6 @@ import onnx_ir
 
 from ctinyml.passes.errors import StructuralPassError
 from ctinyml.passes.onnx_ir_passes.drop_noop_reshape import DropNoopReshapePass
-from ctinyml.passes.onnx_ir_passes.fold_div_into_quant import FoldDivIntoQuantPass
 from ctinyml.passes.onnx_ir_passes.fuse_relu import FuseReluPass
 
 __all__ = [
@@ -25,7 +24,6 @@ __all__ = [
 STRUCTURAL_PASSES = onnx_ir.passes.Sequential(
     DropNoopReshapePass(),
     FuseReluPass(),
-    FoldDivIntoQuantPass(),
 )
 
 

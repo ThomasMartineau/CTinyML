@@ -70,11 +70,12 @@ def dynamic_batch_graph(tmp_path) -> str:
 
 
 def div_relu_graph(tmp_path) -> str:
-    """Minimal Div(input, scalar) -> Relu graph, for fold_div_into_quant."""
+    """Minimal Div(input, scalar) -> Relu graph (Div is not a supported op:
+    a leading /255 is the fixed INT8 input encoding, not a graph node)."""
     x = oh.make_tensor_value_info("x", onnx.TensorProto.FLOAT, [1, 4])
     y = oh.make_tensor_value_info("y", onnx.TensorProto.FLOAT, [1, 4])
 
-    scale = oh.make_tensor("scale", onnx.TensorProto.FLOAT, [], [2.0])
+    scale = oh.make_tensor("scale", onnx.TensorProto.FLOAT, [], [255.0])
 
     div = oh.make_node("Div", inputs=["x", "scale"], outputs=["div_out"])
     relu = oh.make_node("Relu", inputs=["div_out"], outputs=["y"])

@@ -10,7 +10,6 @@ from tests.fixtures import synthetic
 MNIST_FIXTURE = Path(__file__).parent / "fixtures" / "mnist" / "mnist_classifier.onnx"
 
 EXPECTED_MNIST_OPS = [
-    "Div",
     "Conv",
     "Relu",
     "Conv",
@@ -24,7 +23,7 @@ EXPECTED_MNIST_OPS = [
 
 def test_mnist_node_count_and_order():
     model = load_model(MNIST_FIXTURE)
-    assert model.graph.num_nodes() == 9
+    assert model.graph.num_nodes() == 8
     assert [n.op_type for n in model.graph.all_nodes()] == EXPECTED_MNIST_OPS
 
 
@@ -50,6 +49,13 @@ def test_conv_relu_synthetic_loads(tmp_path):
 def test_unsupported_op_rejected(tmp_path):
     path = synthetic.unsupported_op_graph(tmp_path)
     with pytest.raises(FrontendError, match="Sigmoid"):
+        load_model(path)
+
+
+def test_leading_div_rejected(tmp_path):
+    # The graph input is already float [0, 1]; a Div(255) is not supported.
+    path = synthetic.div_relu_graph(tmp_path)
+    with pytest.raises(FrontendError, match="Div"):
         load_model(path)
 
 

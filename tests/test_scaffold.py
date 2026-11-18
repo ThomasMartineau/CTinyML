@@ -14,7 +14,6 @@ STUB_MODULES = [
     "ctinyml.frontend",
     "ctinyml.frontend.load",
     "ctinyml.passes",
-    "ctinyml.passes.onnx_ir_passes.fold_div_into_quant",
     "ctinyml.passes.onnx_ir_passes.drop_noop_reshape",
     "ctinyml.passes.onnx_ir_passes.fuse_relu",
     "ctinyml.passes.convert_to_closed_ir",

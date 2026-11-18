@@ -30,14 +30,22 @@ def main() -> None:
     calib_idx = rng.choice(len(X_train), size=128, replace=False)
     eval_idx = rng.choice(len(X_test), size=100, replace=False)
 
-    calibration_images = X_train[calib_idx].reshape(-1, 1, 28, 28).astype(np.float32)
-    eval_images = X_test[eval_idx].reshape(-1, 1, 28, 28).astype(np.float32)
+    # Input contract: the graph input is a float in [0, 1] with a fixed INT8
+    # encoding (scale 1/255, zero_point -128), so a uint8 pixel p is exactly
+    # int8 p - 128. `eval_images_int8` stores those wire-ready bytes (what
+    # tools/serial_infer.py sends to the board as-is).
+    calibration_pixels = X_train[calib_idx].reshape(-1, 1, 28, 28)
+    eval_pixels = X_test[eval_idx].reshape(-1, 1, 28, 28)
+    calibration_images = (calibration_pixels / 255.0).astype(np.float32)
+    eval_images = (eval_pixels / 255.0).astype(np.float32)
+    eval_images_int8 = (np.rint(eval_pixels).astype(np.int16) - 128).astype(np.int8)
     eval_labels = y_test[eval_idx]
 
     np.savez_compressed(
         OUTPUT,
         calibration_images=calibration_images,
         eval_images=eval_images,
+        eval_images_int8=eval_images_int8,
         eval_labels=eval_labels,
     )
     print(f"wrote {OUTPUT} ({OUTPUT.stat().st_size} bytes)")

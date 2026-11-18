@@ -20,7 +20,6 @@ def test_convert_mnist_structure():
     graph = _mnist_closed_ir()
 
     assert [op.op_type for op in graph.ops] == ["Conv", "Conv", "Gemm", "ArgMax"]
-    assert graph.input_prescale == 255.0
 
     conv1, conv2, gemm, argmax = graph.ops
     assert conv1.attrs["clamp_min0"] == 1

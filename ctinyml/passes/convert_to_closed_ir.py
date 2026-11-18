@@ -47,11 +47,8 @@ def convert(model: ir.Model) -> closed_ir.Graph:
             )
         )
 
-    input_prescale = graph.meta.get("input_prescale")
-
     return closed_ir.Graph(
         ops=ops,
         inputs=[to_tensor(v) for v in graph.inputs],
         outputs=[to_tensor(v) for v in graph.outputs],
-        input_prescale=input_prescale,
     )

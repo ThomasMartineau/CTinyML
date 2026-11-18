@@ -15,7 +15,7 @@ The compiler is written in Python and the generated code is plain C. Weights liv
  frontend            load + shape inference, reject unsupported ops / dynamic shapes
      │
      ▼
- structural passes   drop no-op Reshape · fuse Relu into Conv/Gemm · record input Div as a prescale
+ structural passes   drop no-op Reshape · fuse Relu into Conv/Gemm
      │               (operate on onnx_ir.Graph)
      ▼
  closed IR           narrow, target-agnostic IR: Conv / Gemm / ArgMax with quantization metadata on tensors
@@ -40,7 +40,7 @@ Everything up to and including the buffer planner is target-agnostic. Only `ctin
 - **Direct convolution**, no im2col. Zero-padding is handled by bounds checks in the loop, so no padded buffer is needed.
 - **One shared kernel per op type**, called with different pointers and dimensions, rather than unrolled code per layer. This keeps flash use down.
 - **ReLU is fused** into the preceding Conv/Gemm as a `clamp_min0` flag.
-- **Input normalization (`Div`) is folded offline** into the first layer's requantization multiplier, so no division runs on the device.
+- **The graph input is a float in [0, 1] with a fixed INT8 encoding** (scale 1/255, zero point -128), so a uint8 pixel `p` is exactly the int8 value `p - 128`. That encoding is the `/255`, so nothing is divided on the device and the model must not contain a leading `Div`. Any other input scaling (mean/std, a different divisor) is not handled yet and must be folded into the first layer's weights before the model reaches the compiler.
 - **`Reshape` is a compile-time alias** when it is a row-major flatten.
 - **The final Gemm skips requantization.** `ArgMax` consumes its raw int32 accumulators directly.
 - **Requantization is a float multiply** (`acc * requant_mult`, round half away from zero, saturate to `[-128, 127]`). AVR emulates float in software either way, so a fixed-point path would only add a second numeric path to validate.
@@ -48,10 +48,10 @@ Everything up to and including the buffer planner is target-agnostic. Only `ctin
 
 ## Supported models
 
-The op set is currently `Div`, `Conv`, `Relu`, `Reshape`, `Gemm`, `ArgMax`, with static shapes and batch size 1. The reference model is a small MNIST classifier:
+The op set is currently `Conv`, `Relu`, `Reshape`, `Gemm`, `ArgMax`, with static shapes and batch size 1. The reference model is a small MNIST classifier:
 
 ```
-Div(255) → Conv(6,1,3×3, s2, p1) → ReLU → Conv(6,6,3×3, s2, p1) → ReLU → Reshape → Gemm(10×294) → Reshape → ArgMax
+Conv(6,1,3×3, s2, p1) → ReLU → Conv(6,6,3×3, s2, p1) → ReLU → Reshape → Gemm(10×294) → Reshape → ArgMax
 ```
 
 Its activations peak at 14×14×6 = 1176 bytes, so the two ping-pong buffers fit comfortably in SRAM.
@@ -96,7 +96,7 @@ uv run pytest
 uv run python -m ctinyml compile model.onnx --target avr --calibration calibration.npz -o build/
 ```
 
-`--target` is required from day one so adding targets later is not a breaking change. `--calibration` takes raw [0, 255] images (an `.npz` with a `calibration_images` array, or a `.npy`) used to calibrate quantization. The command runs the full pipeline and writes `model.c` plus the AVR runtime headers into the output directory.
+`--target` is required from day one so adding targets later is not a breaking change. `--calibration` takes float [0, 1] images (an `.npz` with a `calibration_images` array, or a `.npy`) used to calibrate quantization. The command runs the full pipeline and writes `model.c` plus the AVR runtime headers into the output directory.
 
 ### Running on hardware
 

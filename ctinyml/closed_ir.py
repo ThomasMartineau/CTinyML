@@ -45,8 +45,6 @@ class Graph:
     ops: list[Op]
     inputs: list[Tensor]
     outputs: list[Tensor]
-    # Folded from onnx_ir Graph.meta["input_prescale"] by fold_div_into_quant.
-    input_prescale: float | None = None
 
     def to_text(self) -> str:
         """Deterministic, human-readable dump for golden-snapshot tests.
@@ -54,9 +52,7 @@ class Graph:
         Intentionally omits initializer `.data` array contents (shapes and
         dtypes only) so the output stays small and reviewable.
         """
-        lines = [f"Graph(input_prescale={_fmt(self.input_prescale)})"]
-
-        lines.append("inputs:")
+        lines = ["inputs:"]
         for t in self.inputs:
             lines.append(f"  {_tensor_line(t)}")
 
